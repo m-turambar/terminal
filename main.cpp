@@ -12,6 +12,9 @@
 
 using namespace std;
 
+//eventually move into terminal class. If set to true CRC calculation will be done
+bool bCalcCRC {true};
+
 template<class T>
 std::ostream& operator << (std::ostream& os, const std::vector<T>& v)
 {
@@ -75,26 +78,37 @@ char toBinary(char c1, char c2)
 	return r1 + r2;
 }
 
-vector<char> hexAsciiToBinary(vector<char> vasc)
+
+auto hexAsciiToBinary(vector<char> cont)
 {
 	vector<char> res;
 
-	if(vasc.size() % 2 != 0)
+	if(cont.size() % 2 != 0)
 	{
 		cerr << "ERROR: Invalid hex string length: Odd\n";
 		exit(-1);
 	}
 	
 	//we get our byte value from the 2 character representation
-	for(int i=0; i < vasc.size(); i+=2)
+	for(int i=0; i < cont.size(); i+=2)
 	{
-		res.push_back( toBinary(vasc[i], vasc[i+1]) );
+		res.push_back( toBinary(cont[i], cont[i+1]) );
 	}
 
 	return res;
 }
 
 size_t crc(vector<char> vuns)
+{
+	size_t checksum=0;
+	for(auto i : vuns)
+		checksum = 0xFF&(checksum + i);
+	checksum = ~checksum;
+
+	return 0xFF&(checksum+1);
+}
+
+size_t crc(std::string vuns)
 {
 	size_t checksum=0;
 	for(auto i : vuns)
@@ -138,7 +152,21 @@ std::string parse_line(std::string line)
 		{
 			shex += toBinary(line[i], line[i+1]);
 		}
+		if(bCalcCRC) {
+			shex += crc(shex);
+		}
 		return shex;
+	}
+	//could this be our option configurator?
+	else if(line[0] == '/')
+	{
+		string cmd = line.substr(1);
+		if(cmd == "crc") {
+			bCalcCRC = !bCalcCRC;
+			cout << "CRC calculation is " << bCalcCRC << endl;
+		}
+		
+		return "";
 	}
 	else
 		return line;
@@ -147,21 +175,30 @@ std::string parse_line(std::string line)
 int main(int argc, char** argv)
 {
 	//el ultimo argumento es la cadena
-	vector<char> vasc(argv[argc-1], argv[argc-1] + strlen(argv[argc-1]) );
-	auto vuns = hexAsciiToBinary(vasc);
+	//vector<char> vasc(argv[argc-1], argv[argc-1] + strlen(argv[argc-1]) );
+	//auto vuns = hexAsciiToBinary(vasc);
 
-	size_t mCrc = crc(vuns);
+	//size_t mCrc = crc(vuns);
 	
-	vuns.push_back(mCrc);
+	//vuns.push_back(mCrc);
 
-	cout << "vasc: \n\t" << vasc << "\n";
-	cout << "vuns: \n\t" << vuns << "\n";
-	printf("check: %02x\n\t", mCrc);
+	//cout << "vasc: \n\t" << vasc << "\n";
+	//cout << "vuns: \n\t" << vuns << "\n";
+	//printf("check: %02x\n\t", mCrc);
 
 	/*************************************/	
-
+	
+	if(argc < 2) {
+		cerr << "Please enter the COM port you wish to connect to.\n"
+			 << "e.g. term COM42\n";
+		exit(-1);
+	}
 	string pCOM = argv[1];
 	int baudios = 115200;
+	
+	cout << "Attempting connection to " << pCOM 
+		 << " with baud rate == " << to_string(baudios) << endl;
+	cout << "CRC calculation is set to " << bCalcCRC << endl;
 
 	try {
 		asio::io_context ctx;	
@@ -179,6 +216,8 @@ int main(int argc, char** argv)
 		sp.set_option(asio::serial_port_base::flow_control(asio::serial_port_base::flow_control::none));
 		sp.set_option(asio::serial_port_base::stop_bits(asio::serial_port_base::stop_bits::one));
 
+		cout << "connected.\n";
+		
 		constexpr auto RXBUF_SZ = 1;
 		char rxbuf[RXBUF_SZ];
 		
@@ -186,13 +225,17 @@ int main(int argc, char** argv)
 		
 		std::thread t([&ctx] () { ctx.run(); } );
 		
-		asio::write(sp, asio::buffer(vuns, vuns.size()) );
+		cout << ">";
 		
 		string line;
 		while(std::getline(cin, line)) 
 		{
 			line = parse_line(line);
-			asio::write(sp, asio::buffer(line, line.size()) ); 
+			
+			//we may pass configuration strings; don't send those.
+			if(line != "")
+				asio::write(sp, asio::buffer(line, line.size()) ); 
+			cout << ">";
 		}
 		
 		ctx.stop();
