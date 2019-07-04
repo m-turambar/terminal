@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <map>
 #include <array>
 #include <cstring>
 #include <functional>
@@ -13,7 +14,9 @@
 using namespace std;
 
 //eventually move into terminal class. If set to true CRC calculation will be done
-bool bCalcCRC {true};
+bool bCalcCRC 	{true};
+bool bHex		{true};
+int estado=0; //jaja nmms
 
 template<class T>
 std::ostream& operator << (std::ostream& os, const std::vector<T>& v)
@@ -34,6 +37,7 @@ std::ostream& operator<<(std::ostream& os, const std::array<T,N> a)
 	os << ']';
 	return os;
 }
+
 
 struct consola
 {
@@ -59,7 +63,7 @@ srv(srv_), pCOM(pCOM_), baudios(baudios_)
 char toBinary(char c1, char c2)
 {
 	char r1, r2;
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 5);
+	//SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 5);
 	
 	
 	if(c1 > '9')
@@ -72,9 +76,8 @@ char toBinary(char c1, char c2)
 	else
 		r2 = (c2-48);
 	
-	printf("%c%c -> %d+%d ", c1, c2, r1, r2);	
-	
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
+	//printf("%c%c -> %d+%d ", c1, c2, r1, r2);	
+	//SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 	return r1 + r2;
 }
 
@@ -130,12 +133,82 @@ void print_as_hex(char* buf, size_t sz)
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 }
 
+//por ahora servira pero es terrible. Asume buffers de 1 char
+/*Podemos estar en estos estados:
+	0: procesando datos arbitrarios
+	1: esperando un caracter especial
+	2: imprimiendo de manera especial los caracteres que llegan
+*/
+void procesar_incoming(char* bf, size_t len)
+{
+	static char aa;
+	static short temperatura, humedad;
+	static unsigned int cnt;
+	assert(len == 1);
+	if(estado == 0 && (*bf != '\\')) {
+		if(bHex)
+				print_as_hex(bf, len);
+			else
+				printf("%.*s", len, bf);
+		return;
+	}
+	
+	if(*bf == '\\') //brincamos a un estado especial donde el proximo caracter nos dirá a que estado ir
+	{
+		if(estado != 0) {//solo deberiamos llegar a 1 despues de 0, fail
+			cerr << "No podemos procesar " << '\\' << " despues de si misma\n";
+			return;
+		}
+		estado = 1;
+		return;
+	}
+	
+	if(estado == 1) {
+		aa = *bf;
+		estado = 2;
+		cnt=0;
+		return;
+	}
+	
+	if (estado == 2) {
+		if(aa == 't')
+		{
+			temperatura = temperatura + (*bf << (8-cnt*8)); //buggggzzzz
+			++cnt;
+			if(cnt == 2) {
+				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 13);
+				cout << "Temperatura: " << temperatura << ' ';
+				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
+				cnt = 0;
+				estado = 0;
+				temperatura = 0;
+				return;
+			}
+		}
+		else if(aa == 'h')
+		{
+			humedad = humedad + (*bf << (8 - cnt*8)); //aaaaaaaaaaaaaaa!!
+			++cnt;
+			if(cnt == 2) {
+				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 11);
+				cout << "Humedad: " << humedad << '\n';
+				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
+				cnt=0;
+				estado = 0;
+				humedad = 0;
+				return;
+			}
+		}
+	}
+	
+}
+
 void do_read(asio::serial_port& sp, char* rxbuf, size_t RXBUF_SZ)
 {
 	asio::async_read(sp, asio::buffer(rxbuf, RXBUF_SZ), 
 			[rxbuf, &sp, RXBUF_SZ](asio::error_code ec, size_t len)
 		{
-			print_as_hex(rxbuf, len);
+			procesar_incoming(rxbuf, RXBUF_SZ);
 			do_read(sp, rxbuf, RXBUF_SZ);
 		});
 }
@@ -164,6 +237,10 @@ std::string parse_line(std::string line)
 		if(cmd == "crc") {
 			bCalcCRC = !bCalcCRC;
 			cout << "CRC calculation is " << bCalcCRC << endl;
+		}
+		if(cmd == "hex") {
+			bHex = !bHex;
+			cout << "Imprimiendo como Hex? " << bHex << endl;
 		}
 		
 		return "";
