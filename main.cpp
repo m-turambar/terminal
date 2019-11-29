@@ -173,7 +173,7 @@ void procesar_incoming(char* bf, size_t len)
 	if (estado == 2) {
 		if(aa == 't')
 		{
-			temperatura = temperatura + (*bf << (8-cnt*8)); //buggggzzzz
+			temperatura = temperatura + (*bf << (8 - cnt*8)); //buggggzzzz
 			++cnt;
 			if(cnt == 2) {
 				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 13);
@@ -208,7 +208,8 @@ void do_read(asio::serial_port& sp, char* rxbuf, size_t RXBUF_SZ)
 	asio::async_read(sp, asio::buffer(rxbuf, RXBUF_SZ), 
 			[rxbuf, &sp, RXBUF_SZ](asio::error_code ec, size_t len)
 		{
-			procesar_incoming(rxbuf, RXBUF_SZ);
+			//procesar_incoming(rxbuf, RXBUF_SZ);
+			print_as_hex(rxbuf, RXBUF_SZ);
 			do_read(sp, rxbuf, RXBUF_SZ);
 		});
 }
@@ -271,7 +272,7 @@ int main(int argc, char** argv)
 		exit(-1);
 	}
 	string pCOM = argv[1];
-	int baudios = 115200;
+	int baudios = 460800;
 	
 	cout << "Attempting connection to " << pCOM 
 		 << " with baud rate == " << to_string(baudios) << endl;
@@ -288,7 +289,7 @@ int main(int argc, char** argv)
 		}
 
 		sp.set_option(asio::serial_port_base::baud_rate(baudios));
-		//sp.set_option(asio::serial_port_base::parity(asio::serial_port_base::parity::even));
+		sp.set_option(asio::serial_port_base::parity(asio::serial_port_base::parity::none));
 		sp.set_option(asio::serial_port_base::character_size(8));
 		sp.set_option(asio::serial_port_base::flow_control(asio::serial_port_base::flow_control::none));
 		sp.set_option(asio::serial_port_base::stop_bits(asio::serial_port_base::stop_bits::one));
