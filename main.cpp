@@ -266,13 +266,15 @@ int main(int argc, char** argv)
 
 	/*************************************/	
 	
-	if(argc < 2) {
-		cerr << "Please enter the COM port you wish to connect to.\n"
-			 << "e.g. term COM42\n";
+	if(argc < 3) {
+		cerr << "Please enter the COM port you wish to connect to, and the baudrate.\n"
+			 << "e.g. term COM42 115200\n";
 		exit(-1);
 	}
 	string pCOM = argv[1];
-	int baudios = 460800;
+	string bd = argv[2];
+	
+	int baudios = stoi(bd);
 	
 	cout << "Attempting connection to " << pCOM 
 		 << " with baud rate == " << to_string(baudios) << endl;
