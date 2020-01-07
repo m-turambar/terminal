@@ -12,10 +12,11 @@
 #include <windows.h>
 
 using namespace std;
+using namespace asio::ip;
 
 //eventually move into terminal class. If set to true CRC calculation will be done
 bool bCalcCRC 	{true};
-bool bHex		{true};
+bool bHex		{false};
 int estado=0; //jaja nmms
 
 template<class T>
@@ -124,93 +125,40 @@ size_t crc(std::string vuns)
 /* prints as green hex and return to normal after */
 void print_as_hex(char* buf, size_t sz)
 {
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 2);
 	for(int i=0; i<sz; ++i)
 	{
 		//otherwise we'd get e.g. 010 instead of 0010.
 		printf("%02x", (unsigned char)buf[i]);
 	}
+}
+
+void procesar_incoming(char* bf, size_t len)
+{
+	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 2);
+	if(bHex)
+		print_as_hex(bf, len);
+	else
+		printf("%.*s", len, bf);
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
 }
 
-//por ahora servira pero es terrible. Asume buffers de 1 char
-/*Podemos estar en estos estados:
-	0: procesando datos arbitrarios
-	1: esperando un caracter especial
-	2: imprimiendo de manera especial los caracteres que llegan
-*/
-void procesar_incoming(char* bf, size_t len)
-{
-	static char aa;
-	static short temperatura, humedad;
-	static unsigned int cnt;
-	assert(len == 1);
-	if(estado == 0 && (*bf != '\\')) {
-		if(bHex)
-				print_as_hex(bf, len);
-			else
-				printf("%.*s", len, bf);
-		return;
-	}
-	
-	if(*bf == '\\') //brincamos a un estado especial donde el proximo caracter nos dirá a que estado ir
-	{
-		if(estado != 0) {//solo deberiamos llegar a 1 despues de 0, fail
-			cerr << "No podemos procesar " << '\\' << " despues de si misma\n";
-			return;
-		}
-		estado = 1;
-		return;
-	}
-	
-	if(estado == 1) {
-		aa = *bf;
-		estado = 2;
-		cnt=0;
-		return;
-	}
-	
-	if (estado == 2) {
-		if(aa == 't')
-		{
-			temperatura = temperatura + (*bf << (8 - cnt*8)); //buggggzzzz
-			++cnt;
-			if(cnt == 2) {
-				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 13);
-				cout << "Temperatura: " << temperatura << ' ';
-				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
-				cnt = 0;
-				estado = 0;
-				temperatura = 0;
-				return;
-			}
-		}
-		else if(aa == 'h')
-		{
-			humedad = humedad + (*bf << (8 - cnt*8)); //aaaaaaaaaaaaaaa!!
-			++cnt;
-			if(cnt == 2) {
-				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 11);
-				cout << "Humedad: " << humedad << '\n';
-				SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 7);
-				cnt=0;
-				estado = 0;
-				humedad = 0;
-				return;
-			}
-		}
-	}
-	
-}
-
-void do_read(asio::serial_port& sp, char* rxbuf, size_t RXBUF_SZ)
+template<typename Conex>
+void do_read(Conex& sp, char* rxbuf, size_t RXBUF_SZ)
 {
 	asio::async_read(sp, asio::buffer(rxbuf, RXBUF_SZ), 
 			[rxbuf, &sp, RXBUF_SZ](asio::error_code ec, size_t len)
 		{
-			//procesar_incoming(rxbuf, RXBUF_SZ);
-			print_as_hex(rxbuf, RXBUF_SZ);
-			do_read(sp, rxbuf, RXBUF_SZ);
+			if(!ec)
+			{
+				//cout << "Rx[" << len << "]:";
+				procesar_incoming(rxbuf, RXBUF_SZ);
+				//print_as_hex(rxbuf, RXBUF_SZ);
+				do_read(sp, rxbuf, RXBUF_SZ);
+			}
+			else
+			{
+				cout << "Error leyendo: " << ec.message() << endl;
+			}
 		});
 }
 
@@ -252,25 +200,13 @@ std::string parse_line(std::string line)
 
 int main(int argc, char** argv)
 {
-	//el ultimo argumento es la cadena
-	//vector<char> vasc(argv[argc-1], argv[argc-1] + strlen(argv[argc-1]) );
-	//auto vuns = hexAsciiToBinary(vasc);
-
-	//size_t mCrc = crc(vuns);
 	
-	//vuns.push_back(mCrc);
-
-	//cout << "vasc: \n\t" << vasc << "\n";
-	//cout << "vuns: \n\t" << vuns << "\n";
-	//printf("check: %02x\n\t", mCrc);
-
-	/*************************************/	
-	
-	if(argc < 3) {
+	/*if(argc < 3) {
 		cerr << "Please enter the COM port you wish to connect to, and the baudrate.\n"
 			 << "e.g. term COM42 115200\n";
 		exit(-1);
 	}
+	
 	string pCOM = argv[1];
 	string bd = argv[2];
 	
@@ -279,10 +215,18 @@ int main(int argc, char** argv)
 	cout << "Attempting connection to " << pCOM 
 		 << " with baud rate == " << to_string(baudios) << endl;
 	cout << "CRC calculation is set to " << bCalcCRC << endl;
+*/
+	if(argc < 3) {
+		cerr << "Pon ip, y puerto.\n"
+			 << "e.g. term 192.168.1.100 3214\n";
+		exit(-1);
+	}
 
+	
 	try {
-		asio::io_context ctx;	
+		asio::io_context ctx;
 
+		/*
 		asio::serial_port sp(ctx, pCOM);
 		
 		if(!sp.is_open()) {
@@ -295,13 +239,35 @@ int main(int argc, char** argv)
 		sp.set_option(asio::serial_port_base::character_size(8));
 		sp.set_option(asio::serial_port_base::flow_control(asio::serial_port_base::flow_control::none));
 		sp.set_option(asio::serial_port_base::stop_bits(asio::serial_port_base::stop_bits::one));
-
+		*/
+		const string huesped = argv[1];
+		const auto puerto = argv[2];
+		tcp::socket msock(ctx);
+		tcp::resolver resolvedor(ctx);
+		tcp::resolver::query query(huesped, puerto); //puedes meter dns aqui
+		tcp::resolver::iterator iter = resolvedor.resolve(query);
+		tcp::endpoint endpoint = iter->endpoint();
+		cout << "Conectando a " << huesped << ":" << puerto << "...\n";
+		asio::error_code ec;
+		msock.connect(endpoint, ec);
+		
+		if(!ec)
+		{
+		  cout << "conectado a " << msock.remote_endpoint().address().to_string()
+			  << ":" << msock.remote_endpoint().port() << '\n';
+		}
+		else
+		{
+		  cout << "Error conectando: " << ec.value() <<  ": " <<  ec.message() << '\n';
+		}
+		
+		
 		cout << "connected.\n";
 		
 		constexpr auto RXBUF_SZ = 1;
 		char rxbuf[RXBUF_SZ];
 		
-		do_read(sp, rxbuf, RXBUF_SZ);
+		do_read(msock, rxbuf, RXBUF_SZ);
 		
 		std::thread t([&ctx] () { ctx.run(); } );
 		
@@ -310,11 +276,11 @@ int main(int argc, char** argv)
 		string line;
 		while(std::getline(cin, line)) 
 		{
-			line = parse_line(line);
+			line = parse_line(line) + std::string("\r\n");
 			
 			//we may pass configuration strings; don't send those.
 			if(line != "")
-				asio::write(sp, asio::buffer(line, line.size()) ); 
+				asio::write(msock, asio::buffer(line, line.size()) ); 
 			cout << ">";
 		}
 		
